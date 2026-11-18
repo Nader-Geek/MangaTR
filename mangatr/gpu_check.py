@@ -48,7 +48,13 @@ class ModelSpec:
 
 
 MODELS: tuple[ModelSpec, ...] = (
-    ModelSpec("detector", "ogkalu/comic-text-and-bubble-detector", "detector.onnx"),
+    # hash recorded from the first download (Colab, 2026-11-18), not independently verified
+    ModelSpec(
+        "detector",
+        "ogkalu/comic-text-and-bubble-detector",
+        "detector.onnx",
+        "065744e91c0594ad8663aa8b870ce3fb27222942eded5a3cc388ce23421bd195",
+    ),
     ModelSpec(
         "aot",
         "ogkalu/aot-inpainting",
