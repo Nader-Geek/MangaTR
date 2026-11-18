@@ -1,0 +1,18 @@
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+dist/
+build/
+*.egg-info/
+
+# runtime data and models never go in git
+work/
+models/
+*.onnx
+*.safetensors
+*.gguf
+
+# golden pages are copyrighted: keep them local, only their manifest is tracked
+tests/golden/images/
