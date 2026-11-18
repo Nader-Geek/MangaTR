@@ -122,6 +122,8 @@ def test_false_positives_are_thin_strips_not_text():
     border = Detection("text_free", 0.9, Rect(0, 0, 12, 300))
     column = Detection("text_bubble", 0.9, Rect(0, 0, 30, 150))  # vertical Japanese
     bubble = Detection("bubble", 0.9, Rect(0, 0, 700, 30))
-    weak = Detection("text_free", 0.4, Rect(0, 0, 80, 40))
-    kept = drop_false_positives([lace, border, column, bubble, weak], 720, min_text_free_score=0.5)
-    assert kept == [column, bubble]
+    weak = Detection("text_free", 0.42, Rect(375, 9935, 320, 163))  # vest ornament
+    strip = Detection("text_free", 0.6, Rect(0, 5357, 720, 111))  # lace across the page
+    real = Detection("text_free", 0.72, Rect(326, 4442, 67, 172))
+    kept = drop_false_positives([lace, border, column, bubble, weak, strip, real], 720)
+    assert kept == [column, bubble, real]

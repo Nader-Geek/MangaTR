@@ -103,19 +103,23 @@ def drop_false_positives(
     page_width: int,
     *,
     max_aspect: float = 10.0,
-    min_text_free_score: float = 0.0,
+    min_text_free_score: float = 0.5,
+    max_width_fraction: float = 0.9,
 ) -> list[Detection]:
-    """Remove text boxes that cannot be lettering: very long thin strips (lace
-    borders, panel edges) and, if asked, free text below a stricter score.
-    Bubbles are never dropped here. Seen on real pages: a box along a dashed
-    panel border and one across a lace strip."""
+    """Remove text boxes that cannot be lettering: very long thin strips, free
+    text spanning the page width, and free text with a weak score. Bubbles are
+    never dropped here. Seen on real pages (two webtoon chapters): a 0.39 box
+    along a dashed panel border, a 0.60 box across a full-width lace strip and
+    a 0.42 box on an ornament of a vest; real free text scored 0.72 to 0.86."""
     kept = []
     for det in detections:
         if det.label != "bubble":
             r = det.rect
             if max(r.w, r.h) / max(1.0, min(r.w, r.h)) > max_aspect:
                 continue
-            if det.label == "text_free" and det.score < min_text_free_score:
+            if det.label == "text_free" and (
+                det.score < min_text_free_score or r.w > max_width_fraction * page_width
+            ):
                 continue
         kept.append(det)
     return kept
