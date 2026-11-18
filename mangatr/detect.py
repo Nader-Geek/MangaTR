@@ -98,6 +98,29 @@ def nms(detections: Sequence[Detection], iou_threshold: float = 0.4) -> list[Det
     return kept
 
 
+def drop_false_positives(
+    detections: Sequence[Detection],
+    page_width: int,
+    *,
+    max_aspect: float = 10.0,
+    min_text_free_score: float = 0.0,
+) -> list[Detection]:
+    """Remove text boxes that cannot be lettering: very long thin strips (lace
+    borders, panel edges) and, if asked, free text below a stricter score.
+    Bubbles are never dropped here. Seen on real pages: a box along a dashed
+    panel border and one across a lace strip."""
+    kept = []
+    for det in detections:
+        if det.label != "bubble":
+            r = det.rect
+            if max(r.w, r.h) / max(1.0, min(r.w, r.h)) > max_aspect:
+                continue
+            if det.label == "text_free" and det.score < min_text_free_score:
+                continue
+        kept.append(det)
+    return kept
+
+
 def plan_tiles(
     height: int, tile_height: int = TILE_HEIGHT, overlap: int = TILE_OVERLAP
 ) -> list[tuple[int, int, int, int]]:

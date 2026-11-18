@@ -22,8 +22,8 @@ import cv2
 import numpy as np
 
 from mangatr.clean_page import clean_page
-from mangatr.detect import Detector, to_blocks
-from mangatr.inpaint import CHEAP_TIERS, Tier
+from mangatr.detect import Detector, drop_false_positives, to_blocks
+from mangatr.inpaint import CHEAP_TIERS, Tier, ring_of
 from mangatr.model_tiers import GPU_FIRST, OnnxInpaintTier, OpenCvTier, load_session
 from mangatr.textmask import text_mask
 
@@ -64,6 +64,52 @@ def mask_view(rgb: np.ndarray, masks) -> np.ndarray:
     return out
 
 
+def difficulty(rgb: np.ndarray, block, mask_entry) -> float:
+    """How busy the background around the lettering is (std of grey in a ring
+    around the mask): the higher, the harder the block to rebuild."""
+    x0, y0, mask = mask_entry
+    full = np.zeros(rgb.shape[:2], bool)
+    h, w = rgb.shape[:2]
+    full_crop = full[y0 : y0 + mask.shape[0], x0 : x0 + mask.shape[1]]
+    full_crop |= mask[: full_crop.shape[0], : full_crop.shape[1]]
+    top, left = max(0, y0 - 16), max(0, x0 - 16)
+    bottom, right = min(h, y0 + mask.shape[0] + 16), min(w, x0 + mask.shape[1] + 16)
+    window = full[top:bottom, left:right]
+    ring = ring_of(window, 12)
+    if ring.sum() < 16:
+        return 0.0
+    gray = cv2.cvtColor(rgb[top:bottom, left:right], cv2.COLOR_RGB2GRAY)
+    return float(gray[ring].std())
+
+
+def crops_sheet(rgb, blocks, masks, cleaned, *, count: int = 8, margin: int = 40, zoom: int = 2):
+    """One row per block, the `count` hardest first: original | mask | each variant,
+    each crop magnified, so ghosts and smears can be seen."""
+    ranked = sorted(blocks, key=lambda b: -difficulty(rgb, b, masks[b.id]))[:count]
+    height, width = rgb.shape[:2]
+    rows = []
+    for block in ranked:
+        f = block.frame
+        x0, y0 = max(0, int(f.x) - margin), max(0, int(f.y) - margin)
+        x1, y1 = min(width, int(f.right) + margin), min(height, int(f.bottom) + margin)
+        mx, my, mask = masks[block.id]
+        view = (rgb * 0.35).astype(np.uint8)
+        view[my : my + mask.shape[0], mx : mx + mask.shape[1]][
+            mask[: height - my, : width - mx]
+        ] = 255
+        tiles = [rgb, view] + list(cleaned.values())
+        row = [t[y0:y1, x0:x1] for t in tiles]
+        row = [cv2.resize(r, None, fx=zoom, fy=zoom, interpolation=cv2.INTER_CUBIC) for r in row]
+        rows.append(
+            label(np.hstack(row), f"{block.id}  " + " | ".join(["original", "mask", *cleaned]))
+        )
+    if not rows:
+        return None
+    wide = max(r.shape[1] for r in rows)
+    rows = [np.pad(r, ((0, 6), (0, wide - r.shape[1]), (0, 0)), constant_values=255) for r in rows]
+    return np.vstack(rows)
+
+
 def variants(
     models_dir: Path, providers: tuple[str, ...]
 ) -> dict[str, tuple[Sequence[Tier], Tier]]:
@@ -87,7 +133,9 @@ def run_page(
         return {"error": "unreadable"}
     rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
     started = time.perf_counter()
-    blocks = to_blocks(detector.detect(rgb))
+    found = detector.detect(rgb)
+    kept = drop_false_positives(found, rgb.shape[1])
+    blocks = to_blocks(kept)
     detect_s = time.perf_counter() - started
     masks = {b.id: text_mask(rgb, b.frame) for b in blocks}
     record: dict = {
@@ -95,6 +143,13 @@ def run_page(
         "blocks": len(blocks),
         "detect_s": round(detect_s, 3),
     }
+    record["detections"] = [
+        [d.label, round(d.score, 3)]
+        + [round(v) for v in (d.rect.x, d.rect.y, d.rect.w, d.rect.h)]
+        + [d in kept]
+        for d in found
+    ]
+    results: dict[str, np.ndarray] = {}
     columns = [
         ("original", rgb),
         (f"boxes ({len(blocks)})", draw_boxes(rgb, blocks)),
@@ -109,6 +164,7 @@ def run_page(
             tiers[step.tier] = tiers.get(step.tier, 0) + len(step.block_ids)
         record[name] = {"seconds": round(seconds, 3), "blocks_by_tier": tiers}
         columns.append((f"{name} {seconds:.2f}s", cleaned))
+        results[name] = cleaned
         progress(f"{path.name} {name} {seconds:.2f}s {tiers}")
     sheet = make_sheet(columns)
     cv2.imwrite(
@@ -116,6 +172,12 @@ def run_page(
         cv2.cvtColor(sheet, cv2.COLOR_RGB2BGR),
         [cv2.IMWRITE_JPEG_QUALITY, 88],
     )
+    crops = crops_sheet(rgb, blocks, masks, results)
+    if crops is not None:
+        crop_path = out_dir / f"{path.stem}_crops.jpg"
+        cv2.imwrite(
+            str(crop_path), cv2.cvtColor(crops, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, 90]
+        )
     return record
 
 

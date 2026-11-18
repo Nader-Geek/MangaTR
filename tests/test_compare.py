@@ -51,3 +51,15 @@ def test_main_needs_the_detector(tmp_path):
         assert "detector.onnx" in str(exit_)
     else:
         raise AssertionError("should exit")
+
+
+def test_crops_sheet_has_a_row_per_block_and_the_record_lists_detections(tmp_path):
+    page = np.full((200, 300, 3), 230, np.uint8)
+    cv2.putText(page, "HI", (60, 85), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 0), 3)
+    path = tmp_path / "p.png"
+    cv2.imwrite(str(path), page)
+    record = run_page(
+        path, Detector(FakeSession()), {"opencv": ((), OpenCvTier())}, tmp_path, lambda _m: None
+    )
+    assert (tmp_path / "p_crops.jpg").exists()
+    assert record["detections"][0][0] == "text_bubble" and record["detections"][0][-1] is True
