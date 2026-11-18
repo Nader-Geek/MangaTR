@@ -11,7 +11,9 @@ requires-python = ">=3.11"
 dependencies = ["numpy>=1.26", "opencv-python-headless>=4.9"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "ruff>=0.6"]
+dev = ["pytest>=8", "ruff>=0.6", "onnx>=1.16", "onnxruntime>=1.18"]
+# on a GPU machine install this instead of onnxruntime: the two conflict
+gpu = ["onnxruntime-gpu>=1.18", "huggingface_hub>=0.23"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["mangatr"]
