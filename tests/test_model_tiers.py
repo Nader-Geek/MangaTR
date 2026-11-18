@@ -126,9 +126,7 @@ def test_router_falls_through_to_a_model_tier():
     mask = np.zeros((60, 60), bool)
     mask[20:40, 20:40] = True
     session = FakeSession(constant(0.5))
-    router = Router(
-        [__import__("mangatr.inpaint", fromlist=["x"]).FlatTier(), OnnxInpaintTier("lama", session)]
-    )
+    router = Router([FlatTier(), OnnxInpaintTier("lama", session)])
     result, tier = router.clean(crop, mask, None)
     assert tier == "lama"
     assert (result[~mask] == crop[~mask]).all()
