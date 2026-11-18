@@ -8,7 +8,7 @@ version = "0.0.0"
 description = "Manga and comic translation, Arabic and English targets"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = ["numpy>=1.26", "opencv-python-headless>=4.9"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.6"]
