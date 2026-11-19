@@ -17,6 +17,7 @@ import numpy as np
 
 from mangatr.bubble import bubble_interior
 from mangatr.inpaint import CHEAP_TIERS, RING_WIDTH, Tier, ring_of
+from mangatr.residue import scrub_residue
 from mangatr.scene import Block
 from mangatr.windows import plan_windows
 
@@ -116,9 +117,11 @@ def clean_page(
             _paste(mask, mx0 - x0, my0 - y0, bmask)
         crop = out[y0:y1, x0:x1]
         started = time.perf_counter()
-        filled = model.fill(crop, mask, ring_of(mask))
+        ring = ring_of(mask)
+        filled = model.fill(crop, mask, ring)
         if filled is None:
             raise RuntimeError(f"model tier {model.name} must always fill")
+        filled, _ = scrub_residue(filled, mask, ring)  # ghosts on a plain surround
         crop[mask] = filled[mask]
         steps.append(Step(window.block_ids, model.name, time.perf_counter() - started))
     return out, steps

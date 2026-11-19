@@ -20,6 +20,7 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
+from mangatr.halo import absorb_halo
 from mangatr.scene import Rect
 
 MIN_DISTANCE = 24  # levels; below this the "ink" is noise
@@ -67,7 +68,7 @@ def text_mask(rgb: np.ndarray, frame: Rect, *, pad: int = 4) -> tuple[int, int, 
     ink = cv2.morphologyEx(ink, cv2.MORPH_CLOSE, close)
     radius = grow_radius(frame.w, frame.h)
     grow = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * radius + 1, 2 * radius + 1))
-    mask = cv2.dilate(ink, grow).astype(bool)
+    mask = absorb_halo(crop, cv2.dilate(ink, grow).astype(bool))
     if mask.mean() > MAX_COVERAGE:
         return x0, y0, whole
     return x0, y0, mask
