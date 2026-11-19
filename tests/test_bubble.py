@@ -61,3 +61,37 @@ def test_bubble_is_whitened_exactly_and_the_box_corners_outside_are_left_alone()
     outside_wall = np.ones(page.shape[:2], bool)
     cv2.ellipse(outside_wall.view(np.uint8), (160, 120), (110, 90), 0, 0, 360, 0, -1)
     assert (out[outside_wall] == page[outside_wall]).all()  # nothing behind the wall changed
+
+
+def test_ring_ignores_the_neighbouring_lettering():
+    page = np.full((100, 300, 3), 240, np.uint8)
+    page[40:60, 20:60] = 0  # block a's ink
+    page[40:60, 62:100] = 0  # block b's ink right next to it
+    ma = np.zeros((20, 40), bool) + True
+    mb = np.zeros((20, 38), bool) + True
+    blocks = [
+        Block(id="a", kind=BlockKind.DIALOGUE, frame=Rect(20, 40, 40, 20), order=0),
+        Block(id="b", kind=BlockKind.DIALOGUE, frame=Rect(62, 40, 38, 20), order=1),
+    ]
+    out, steps = clean_page(
+        page, blocks, {"a": (20, 40, ma), "b": (62, 40, mb)}, model=OpenCvTier()
+    )
+    assert {s.tier for s in steps} == {"flat"}  # without the exclusion b's ink fails the gate
+    assert (out[40:60, 20:100] == 240).all() or (
+        np.abs(out[40:60, 20:60].astype(int) - 240) < 3
+    ).all()
+
+
+def test_a_lettering_crossing_the_wall_is_not_clipped_to_the_bubble():
+    page = page_with_bubble()
+    crossing = np.zeros(page.shape[:2], bool)
+    crossing[100:140, 20:200] = True  # runs across the left wall of the ellipse
+    block = Block(
+        id="b1",
+        kind=BlockKind.DIALOGUE,
+        frame=Rect(20, 100, 180, 40),
+        order=0,
+        balloon=((50, 30), (270, 30), (270, 210), (50, 210)),
+    )
+    _, steps = clean_page(page, [block], {"b1": (0, 0, crossing)}, model=OpenCvTier())
+    assert [s.tier for s in steps] == ["opencv"]

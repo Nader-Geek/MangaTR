@@ -20,6 +20,8 @@ from mangatr.inpaint import CHEAP_TIERS, RING_WIDTH, Tier, ring_of
 from mangatr.scene import Block
 from mangatr.windows import plan_windows
 
+INSIDE = 0.9  # share of a mask that must lie in its bubble for the bubble to be used (Koharu)
+
 BlockMask = tuple[int, int, np.ndarray]  # x0, y0, boolean crop (from textmask.text_mask)
 
 
@@ -79,11 +81,21 @@ def clean_page(
         crop = out[y0:y1, x0:x1]
         interior = bubble_interior(crop, mask) if block.balloon else None
         if interior is not None:
-            mask &= interior  # never touch the wall or what is behind it
-            if not mask.any():
-                continue
+            if (mask & interior).sum() < INSIDE * mask.sum():
+                interior = None  # the lettering crosses the wall: not paper, leave it to the model
+            else:
+                mask &= interior  # never touch the wall or what is behind it
+        if not mask.any():
+            continue
+        # the ring never reads another lettering's pixels (Koharu's `covered`, KOMA's rule)
+        others = np.zeros(mask.shape, bool)
+        for other in blocks:
+            if other.id != block.id and other.id in masks:
+                ox, oy, omask = masks[other.id]
+                _paste(others, ox - x0, oy - y0, omask)
+        valid = ~others if interior is None else interior & ~others
         used[block.id] = (x0, y0, mask.copy())
-        ring = ring_of(mask, valid=interior)
+        ring = ring_of(mask, valid=valid)
         started = time.perf_counter()
         for tier in cheap:
             filled = tier.fill(crop, mask, ring)
