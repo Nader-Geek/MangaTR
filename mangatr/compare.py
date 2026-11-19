@@ -24,7 +24,8 @@ import numpy as np
 from mangatr.clean_page import clean_page
 from mangatr.detect import Detector, drop_false_positives, to_blocks
 from mangatr.inpaint import CHEAP_TIERS, Tier, ring_of
-from mangatr.model_tiers import GPU_FIRST, OnnxInpaintTier, OpenCvTier, load_session
+from mangatr.model_tiers import OpenCvTier, load_inpaint_tier
+from mangatr.runtime import open_session
 from mangatr.textmask import text_mask
 
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp"}
@@ -111,18 +112,24 @@ def crops_sheet(rgb, blocks, masks, cleaned, *, count: int = 8, margin: int = 40
 
 
 def variants(
-    models_dir: Path, providers: tuple[str, ...]
-) -> dict[str, tuple[Sequence[Tier], Tier]]:
-    """name -> (cheap tiers, model tier). Missing model files are skipped."""
+    models_dir: Path, *, cpu: bool = False
+) -> tuple[dict[str, tuple[Sequence[Tier], Tier]], dict[str, dict]]:
+    """name -> (cheap tiers, model tier), and what loading each model did (providers,
+    GPU/CPU parity). Missing model files are skipped."""
     found: dict[str, tuple[Sequence[Tier], Tier]] = {"opencv": ((), OpenCvTier())}
+    infos: dict[str, dict] = {}
     for kind, filename in (("aot", "aot.onnx"), ("lama", "lama-manga-dynamic.onnx")):
         path = models_dir / filename
-        if path.exists():
-            tier = OnnxInpaintTier(kind, load_session(str(path), providers))
-            found[kind] = ((), tier)
-            if kind == "lama":
-                found["cheap+lama"] = (CHEAP_TIERS, tier)
-    return found
+        if not path.exists():
+            continue
+        tier, info = load_inpaint_tier(kind, str(path), check_parity=not cpu)
+        infos[kind] = info
+        found[kind] = ((), tier)
+        if kind == "lama":
+            found["cheap+lama"] = (CHEAP_TIERS, tier)
+        if kind == "aot":
+            found["cheap+aot"] = (CHEAP_TIERS, tier)
+    return found, infos
 
 
 def run_page(
@@ -192,16 +199,16 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     models_dir, out_dir = Path(args.models_dir), Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
-    providers = ("CPUExecutionProvider",) if args.cpu else GPU_FIRST
     detector_path = models_dir / "detector.onnx"
     if not detector_path.exists():
         raise SystemExit(f"{detector_path} is missing; run mangatr.gpu_check first")
-    detector = Detector(load_session(str(detector_path), providers))
-    chosen = variants(models_dir, providers)
+    detector = Detector(open_session(str(detector_path), prefer_gpu=not args.cpu))
+    chosen, infos = variants(models_dir, cpu=args.cpu)
     pages = sorted(p for p in Path(args.images).rglob("*") if p.suffix.lower() in IMAGE_SUFFIXES)
     if args.limit:
         pages = pages[: args.limit]
     timings = {page.name: run_page(page, detector, chosen, out_dir, print) for page in pages}
+    timings["_models"] = infos
     (out_dir / "timings.json").write_text(json.dumps(timings, indent=2), encoding="utf-8")
     print(f"{len(pages)} sheets in {out_dir}")
     return 0

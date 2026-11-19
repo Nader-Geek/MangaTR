@@ -41,7 +41,8 @@ def test_a_page_goes_through_and_the_record_has_timings(tmp_path):
 
 
 def test_variants_without_model_files_is_just_opencv(tmp_path):
-    assert list(variants(tmp_path, ("CPUExecutionProvider",))) == ["opencv"]
+    found, infos = variants(tmp_path, cpu=True)
+    assert list(found) == ["opencv"] and infos == {}
 
 
 def test_main_needs_the_detector(tmp_path):

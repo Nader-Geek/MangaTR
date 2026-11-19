@@ -134,3 +134,52 @@ def load_session(path: str, providers: tuple[str, ...] = GPU_FIRST):
     import onnxruntime as ort
 
     return ort.InferenceSession(path, providers=list(providers))
+
+
+PARITY_TOLERANCE = 6.0  # levels of 255; the old engine's limit for "the GPU is sound"
+
+
+def _parity_sample() -> tuple[np.ndarray, np.ndarray]:
+    """The old engine's check picture: half blue-brown and half near white, two dark
+    discs, each masked. A GPU that tints its output (seen on LaMa with some FFT
+    kernels) shows as a colour cast on the filled discs."""
+    height, width = 128, 160
+    image = np.zeros((height, width, 3), np.uint8)
+    image[:, :] = (250, 250, 250)
+    image[:, : width // 2] = (170, 70, 40)
+    mask = np.zeros((height, width), np.uint8)
+    for cx in (width // 4, 3 * width // 4):
+        cv2.circle(image, (cx, height // 2), 12, (20, 20, 20), -1)
+        cv2.circle(mask, (cx, height // 2), 13, 255, -1)
+    return image, mask > 0
+
+
+def parity_difference(kind: Literal["aot", "lama"], gpu_session: Any, cpu_session: Any) -> float:
+    """Largest difference, in levels of 255, between what the two sessions fill into
+    the check picture. Ported from the old engine's `_gpu_fill_parity_check`."""
+    image, mask = _parity_sample()
+    from_gpu = OnnxInpaintTier(kind, gpu_session).fill(image, mask, mask)
+    from_cpu = OnnxInpaintTier(kind, cpu_session).fill(image, mask, mask)
+    return float(np.abs(from_gpu.astype(np.float32) - from_cpu.astype(np.float32)).max())
+
+
+def load_inpaint_tier(
+    kind: Literal["aot", "lama"], path: str, *, check_parity: bool = True
+) -> tuple[OnnxInpaintTier, dict[str, Any]]:
+    """The tier for a model file, on the GPU when that is sound. Returns the tier
+    and what happened: providers used, the parity difference, and whether it fell
+    back to the CPU because the GPU's output differs from the CPU's."""
+    from mangatr.runtime import CPU, open_session
+
+    info: dict[str, Any] = {}
+    session = open_session(path)
+    providers = list(session.get_providers())
+    info["providers"] = providers
+    if check_parity and providers and providers[0] != CPU:
+        cpu = open_session(path, prefer_gpu=False)
+        diff = parity_difference(kind, session, cpu)
+        info["parity_difference"] = round(diff, 2)
+        if diff > PARITY_TOLERANCE:
+            info["fell_back_to_cpu"] = True
+            session = cpu
+    return OnnxInpaintTier(kind, session), info
