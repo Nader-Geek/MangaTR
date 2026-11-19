@@ -8,5 +8,7 @@
 | `mangatr/bubble.py` | Old engine (`85_cleanup.py`, `_bubble_domain_local`, `_bubble_interior_mask`) | MIT, same author | The bubble-interior idea, re-written. |
 | `mangatr/halo.py` | Old engine (`85_cleanup.py`, `_absorb_text_halo`) | MIT, same author | The halo-absorption logic, improved: any colour and faintness (paper/ink mixture) instead of fixed warm hues. |
 | `mangatr/residue.py` | Old engine (`85_cleanup.py`, `_scrub_bright_residuals`, `_scrub_dark_residuals`) | MIT, same author | Ghost scrub on a plain surround, merged into one pass, estimated from the ring only. |
+| `mangatr/detect.py` (`nms`, `holding_bubble`) | Koharu (`koharu-ml/.../koharu_layout_highres/suppress.rs`, `layout.rs`) | MIT / Apache-2.0 | The duplicate and nested-text suppression rules and the bubble-holds-half rule, with Koharu's measured thresholds (IoU 0.5, nested 0.8, in-bubble 0.5). Re-written for boxes. |
+| `mangatr/strips.py` | KOMA Studio (`services/splitter_analysis.py`) | MIT | The empty-row projection idea for cutting long strips, improved (uniform rows, gap centre, target height). |
 
 Models are downloaded at run time and are not part of this repository; each has its own licence (see docs/DESIGN.md, risks).

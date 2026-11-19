@@ -24,6 +24,7 @@ import cv2
 import numpy as np
 
 from mangatr.scene import Block, BlockKind, Rect
+from mangatr.strips import choose_cuts, empty_rows, gap_centres, tiles_from_cuts
 
 INPUT_SIZE = 640
 LABELS = {0: "bubble", 1: "text_bubble", 2: "text_free"}
@@ -82,18 +83,42 @@ def decode(
     return found
 
 
-def _iou(a: Rect, b: Rect) -> float:
+TEXT_LABELS = ("text_bubble", "text_free")
+DUPLICATE_IOU = 0.5  # Koharu's value (supervision's `with_nms` default)
+NESTED_TEXT = 0.8  # share of a text box inside another text box: the same block or a fragment
+
+
+def _overlap(a: Rect, b: Rect) -> tuple[float, float]:
+    """IoU of two boxes, and the share of the smaller one that lies inside the other."""
     inter = a.intersection_area(b)
     union = a.area + b.area - inter
-    return inter / union if union > 0 else 0.0
+    smaller = min(a.area, b.area)
+    return (inter / union if union > 0 else 0.0, inter / smaller if smaller > 0 else 0.0)
 
 
-def nms(detections: Sequence[Detection], iou_threshold: float = 0.4) -> list[Detection]:
-    """Greedy non-maximum suppression within each label (a bubble and the text
-    inside it are different things and must both survive)."""
+def nms(
+    detections: Sequence[Detection],
+    iou_threshold: float = DUPLICATE_IOU,
+    nested_text: float = NESTED_TEXT,
+) -> list[Detection]:
+    """Remove duplicates, most confident first. Rules from Koharu's layout model
+    (crates/koharu-ml/.../suppress.rs, MIT; thresholds measured by its authors on
+    212 pages of Blue Archive comics): within one label, a box overlapping a kept
+    one with IoU >= 0.5 is a duplicate; and for text, a box with >= 80% of it inside
+    a kept text box is a fragment of it (or a merge with an aside) and goes too.
+    Bubbles nest legitimately, so nesting alone removes only text. A bubble and the
+    text inside it are different labels and both survive."""
     kept: list[Detection] = []
     for det in sorted(detections, key=lambda d: -d.score):
-        if all(k.label != det.label or _iou(k.rect, det.rect) < iou_threshold for k in kept):
+        duplicate = False
+        for k in kept:
+            if k.label != det.label:
+                continue
+            iou, inside = _overlap(k.rect, det.rect)
+            if iou >= iou_threshold or (det.label in TEXT_LABELS and inside >= nested_text):
+                duplicate = True
+                break
+        if not duplicate:
             kept.append(det)
     return kept
 
@@ -149,7 +174,7 @@ def plan_tiles(
 def merge_tiles(
     per_tile: Sequence[Sequence[Detection]],
     tiles: Sequence[tuple[int, int, int, int]],
-    iou_threshold: float = 0.4,
+    iou_threshold: float = DUPLICATE_IOU,
 ) -> list[Detection]:
     """Shift each tile's detections to page coordinates, keep those whose centre
     lies in the tile's core band (so each text is owned by one tile), then NMS."""
@@ -182,6 +207,25 @@ def reading_order(rects: Sequence[Rect], *, rtl: bool = True) -> list[int]:
     return order
 
 
+IN_BUBBLE = 0.5  # share of a text box a bubble must hold (Koharu layout.rs `IN_BUBBLE`)
+
+
+def holding_bubble(text: Rect, bubbles: Sequence[Rect]) -> Rect | None:
+    """The bubble that holds most of the text box, at least IN_BUBBLE of it; the
+    smaller bubble when two hold as much. Koharu measured that no text on its test
+    pages had a fifth of its box in a second bubble, so the best one is the only one.
+    (Koharu uses the glyph pixels; we only have the box, so this is the box's share.)"""
+    best: tuple[float, float, Rect] | None = None
+    for bubble in bubbles:
+        share = text.intersection_area(bubble) / text.area if text.area > 0 else 0.0
+        if share < IN_BUBBLE:
+            continue
+        key = (share, -bubble.area)
+        if best is None or key > best[:2]:
+            best = (share, -bubble.area, bubble)
+    return best[2] if best else None
+
+
 def to_blocks(detections: Sequence[Detection], *, rtl: bool = True) -> list[Block]:
     """Text detections become blocks, numbered in reading order. A text box whose
     centre lies in a bubble gets that bubble (the smallest one) as its balloon."""
@@ -190,11 +234,10 @@ def to_blocks(detections: Sequence[Detection], *, rtl: bool = True) -> list[Bloc
     blocks: list[Block] = []
     for index in reading_order([d.rect for d in texts], rtl=rtl):
         det = texts[index]
-        cx, cy = det.rect.x + det.rect.w / 2, det.rect.y + det.rect.h / 2
-        inside = [b for b in bubbles if b.x <= cx <= b.right and b.y <= cy <= b.bottom]
+        holder = holding_bubble(det.rect, bubbles)
         balloon = None
-        if inside:
-            b = min(inside, key=lambda r: r.area)
+        if holder is not None:
+            b = holder
             balloon = ((b.x, b.y), (b.right, b.y), (b.right, b.bottom), (b.x, b.bottom))
         kind = BlockKind.DIALOGUE if det.label == "text_bubble" else BlockKind.FREE_TEXT
         blocks.append(
@@ -213,7 +256,9 @@ def to_blocks(detections: Sequence[Detection], *, rtl: bool = True) -> list[Bloc
 class Detector:
     """The ONNX model behind `decode`. `session` is an InferenceSession or a stand-in."""
 
-    def __init__(self, session: Any, *, threshold: float = 0.35, iou: float = 0.4) -> None:
+    def __init__(
+        self, session: Any, *, threshold: float = 0.35, iou: float = DUPLICATE_IOU
+    ) -> None:
         names = [item.name for item in session.get_inputs()]
         self._session = session
         self._images = "images" if "images" in names else names[0]
@@ -229,8 +274,22 @@ class Detector:
         height, width = rgb.shape[:2]
         return nms(decode(outputs, width, height, threshold=self.threshold), self.iou)
 
+    @staticmethod
+    def _tiles(rgb: np.ndarray) -> list[tuple[int, int, int, int]]:
+        """Tiles for a tall page, cut in empty gaps when there are any near the wanted
+        height (KOMA's idea, see strips.py), else at fixed steps."""
+        height = rgb.shape[0]
+        if height <= TILE_HEIGHT * 1.25:
+            return [(0, height, 0, height)]
+        gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+        centres = gap_centres(empty_rows(gray))
+        if not centres:
+            return plan_tiles(height)
+        cuts = choose_cuts(height, centres, TILE_HEIGHT, window=TILE_HEIGHT // 3)
+        return tiles_from_cuts(height, cuts, TILE_OVERLAP // 2)
+
     def detect(self, rgb: np.ndarray) -> list[Detection]:
-        tiles = plan_tiles(rgb.shape[0])
+        tiles = self._tiles(rgb)
         per_tile = [self._one(rgb[start:end]) for _, _, start, end in tiles]
         if len(tiles) == 1:
             return per_tile[0]

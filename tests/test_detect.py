@@ -5,6 +5,7 @@ from mangatr.detect import (
     Detection,
     Detector,
     decode,
+    holding_bubble,
     merge_tiles,
     nms,
     plan_tiles,
@@ -127,3 +128,27 @@ def test_false_positives_are_thin_strips_not_text():
     real = Detection("text_free", 0.72, Rect(326, 4442, 67, 172))
     kept = drop_false_positives([lace, border, column, bubble, weak, strip, real], 720)
     assert kept == [column, bubble, real]
+
+
+def test_fragments_and_merges_of_a_text_box_are_suppressed_but_bubbles_still_nest():
+    whole = Detection("text_bubble", 0.8, Rect(100, 100, 100, 300))
+    twin = Detection("text_bubble", 0.5, Rect(105, 100, 100, 290))  # a duplicate
+    fragment = Detection("text_bubble", 0.4, Rect(150, 110, 40, 150))  # inside the whole
+    merged = Detection("text_bubble", 0.3, Rect(40, 100, 160, 320))  # whole plus an aside
+    aside = Detection("text_bubble", 0.35, Rect(40, 300, 50, 120))
+    bubble = Detection("bubble", 0.9, Rect(90, 90, 120, 320))
+    outer_bubble = Detection("bubble", 0.8, Rect(0, 0, 400, 500))  # nests in nothing smaller
+    inner_bubble = Detection("bubble", 0.7, Rect(100, 100, 100, 100))
+    kept = nms([whole, twin, fragment, merged, aside, bubble, outer_bubble, inner_bubble])
+    assert whole in kept and aside in kept
+    assert twin not in kept and fragment not in kept and merged not in kept
+    assert bubble in kept and outer_bubble in kept and inner_bubble in kept
+
+
+def test_a_text_is_held_by_the_bubble_with_most_of_its_box_not_by_its_centre():
+    big = Rect(0, 0, 300, 300)
+    small = Rect(40, 40, 120, 120)
+    text = Rect(60, 60, 60, 60)  # fully in both: the smaller one wins
+    assert holding_bubble(text, [big, small]) == small
+    edge_remark = Rect(280, 100, 60, 40)  # mostly outside: 20/60 inside the big bubble
+    assert holding_bubble(edge_remark, [big]) is None
