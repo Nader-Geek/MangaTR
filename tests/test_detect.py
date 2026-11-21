@@ -52,6 +52,15 @@ def test_nms_is_per_label():
     assert nms([a, b, c]) == [a, c]
 
 
+def test_the_same_lettering_under_both_text_labels_is_kept_once():
+    free = Detection("text_free", 0.70, Rect(118, 5310, 576, 123))
+    bubble = Detection("text_bubble", 0.61, Rect(118, 5310, 576, 123))
+    assert nms([bubble, free]) == [free]
+    # a text box inside a bubble box is still a different thing
+    holder = Detection("bubble", 0.5, Rect(100, 5300, 600, 150))
+    assert nms([free, holder]) == [free, holder]
+
+
 def test_preprocess_shapes():
     tensor, sizes = preprocess(np.zeros((300, 200, 3), np.uint8))
     assert tensor.shape == (1, 3, 640, 640) and tensor.dtype == np.float32

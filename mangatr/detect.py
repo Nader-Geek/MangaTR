@@ -107,15 +107,18 @@ def nms(
     one with IoU >= 0.5 is a duplicate; and for text, a box with >= 80% of it inside
     a kept text box is a fragment of it (or a merge with an aside) and goes too.
     Bubbles nest legitimately, so nesting alone removes only text. A bubble and the
-    text inside it are different labels and both survive."""
+    text inside it both survive. The two text labels count as one class: the model
+    often gives the same lettering as text_free and text_bubble (seen on a real
+    chapter, five pages), and the more confident one is kept."""
     kept: list[Detection] = []
     for det in sorted(detections, key=lambda d: -d.score):
         duplicate = False
         for k in kept:
-            if k.label != det.label:
+            both_text = k.label in TEXT_LABELS and det.label in TEXT_LABELS
+            if k.label != det.label and not both_text:
                 continue
             iou, inside = _overlap(k.rect, det.rect)
-            if iou >= iou_threshold or (det.label in TEXT_LABELS and inside >= nested_text):
+            if iou >= iou_threshold or (both_text and inside >= nested_text):
                 duplicate = True
                 break
         if not duplicate:
