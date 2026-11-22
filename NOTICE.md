@@ -13,3 +13,7 @@
 | `mangatr/ocr_models.py` | manga-ocr (kha-white/manga-ocr-base) | Apache-2.0 (model card) | The published recipe: grayscale, the model's image processor, greedy generation, whitespace and ellipsis tidy-up. Weights are downloaded, not copied. |
 
 Models are downloaded at run time and are not part of this repository; each has its own licence (see docs/DESIGN.md, risks).
+
+## Licence policy
+
+This project is for private use: not commercial, not distributed. Components under GPL-3.0 (Comic Text Detector, BallonsTranslator code) or CC BY-NC-SA 4.0 (manga-ocr-base-CPT-flex weights, manga-ocr-ar) may therefore be used. Their licences are recorded as provenance. **If the project is ever shared, published or monetised, every such component must be re-checked or removed first.** See docs/REFERENCES.md.
