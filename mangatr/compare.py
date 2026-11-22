@@ -25,7 +25,9 @@ from mangatr.clean_page import clean_page
 from mangatr.detect import Detector, drop_false_positives, to_blocks
 from mangatr.inpaint import CHEAP_TIERS, Tier, ring_of
 from mangatr.model_tiers import OpenCvTier, load_inpaint_tier
+from mangatr.ocr import OcrStage
 from mangatr.runtime import open_session
+from mangatr.scene import Page
 from mangatr.textmask import text_mask
 
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp"}
@@ -132,8 +134,28 @@ def variants(
     return found, infos
 
 
+def read_blocks(ocr: OcrStage, rgb: np.ndarray, blocks: list, name: str) -> tuple[list, dict]:
+    """Run the OCR stage on a page's blocks. Returns the blocks that are lettering
+    and a record of what was read and what was dropped as not lettering."""
+    page = Page(name, name, rgb.shape[1], rgb.shape[0], list(blocks))
+    ocr.dropped = []
+    started = time.perf_counter()
+    ocr.read(page, rgb)
+    record = {
+        "seconds": round(time.perf_counter() - started, 3),
+        "dropped": list(ocr.dropped),
+        "text": {b.id: b.source_text for b in page.blocks},
+    }
+    return page.blocks, record
+
+
 def run_page(
-    path: Path, detector: Detector, chosen: dict, out_dir: Path, progress: Callable[[str], None]
+    path: Path,
+    detector: Detector,
+    chosen: dict,
+    out_dir: Path,
+    progress: Callable[[str], None],
+    ocr: OcrStage | None = None,
 ) -> dict:
     bgr = cv2.imread(str(path), cv2.IMREAD_COLOR)
     if bgr is None:
@@ -144,12 +166,17 @@ def run_page(
     kept = drop_false_positives(found, rgb.shape[1])
     blocks = to_blocks(kept)
     detect_s = time.perf_counter() - started
+    read: dict | None = None
+    if ocr is not None:
+        blocks, read = read_blocks(ocr, rgb, blocks, path.name)
     masks = {b.id: text_mask(rgb, b.frame) for b in blocks}
     record: dict = {
         "size": [rgb.shape[1], rgb.shape[0]],
         "blocks": len(blocks),
         "detect_s": round(detect_s, 3),
     }
+    if read is not None:
+        record["ocr"] = read
     record["detections"] = [
         [d.label, round(d.score, 3)]
         + [round(v) for v in (d.rect.x, d.rect.y, d.rect.w, d.rect.h)]
@@ -195,6 +222,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--out", default="sheets")
     parser.add_argument("--limit", type=int, default=0, help="first N pages; 0 = all")
     parser.add_argument("--cpu", action="store_true", help="do not use CUDA")
+    parser.add_argument(
+        "--ocr",
+        action="store_true",
+        help="read each block (Japanese, manga-ocr) and drop boxes that are not lettering",
+    )
     args = parser.parse_args(argv)
 
     models_dir, out_dir = Path(args.models_dir), Path(args.out)
@@ -207,7 +239,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     pages = sorted(p for p in Path(args.images).rglob("*") if p.suffix.lower() in IMAGE_SUFFIXES)
     if args.limit:
         pages = pages[: args.limit]
-    timings = {page.name: run_page(page, detector, chosen, out_dir, print) for page in pages}
+    ocr = None
+    if args.ocr:
+        from .ocr_models import MangaOcr
+
+        ocr = OcrStage([MangaOcr.load(device="cpu" if args.cpu else None)])
+    timings = {page.name: run_page(page, detector, chosen, out_dir, print, ocr) for page in pages}
     timings["_models"] = infos
     (out_dir / "timings.json").write_text(json.dumps(timings, indent=2), encoding="utf-8")
     print(f"{len(pages)} sheets in {out_dir}")

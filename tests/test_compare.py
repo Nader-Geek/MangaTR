@@ -64,3 +64,34 @@ def test_crops_sheet_has_a_row_per_block_and_the_record_lists_detections(tmp_pat
     )
     assert (tmp_path / "p_crops.jpg").exists()
     assert record["detections"][0][0] == "text_bubble" and record["detections"][0][-1] is True
+
+
+class _Reader:
+    name = "fake"
+    languages = frozenset({"ja"})
+
+    def __init__(self, text):
+        self.text = text
+
+    def read(self, crops):
+        from mangatr.ocr import Reading
+
+        return [Reading(self.text, 0.9) for _ in crops]
+
+
+def test_ocr_drops_a_box_that_is_not_lettering_and_records_the_text(tmp_path):
+    from mangatr.ocr import OcrStage
+
+    page = np.full((200, 300, 3), 230, np.uint8)
+    cv2.putText(page, "HI", (60, 85), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 0), 3)
+    path = tmp_path / "p.png"
+    cv2.imwrite(str(path), page)
+    chosen = {"opencv": ((), OpenCvTier())}
+    kept = run_page(
+        path, Detector(FakeSession()), chosen, tmp_path, lambda _m: None, OcrStage([_Reader("あ")])
+    )
+    assert kept["blocks"] == 1 and kept["ocr"]["text"] == {"b1": "あ"}
+    gone = run_page(
+        path, Detector(FakeSession()), chosen, tmp_path, lambda _m: None, OcrStage([_Reader("…")])
+    )
+    assert gone["blocks"] == 0 and gone["ocr"]["dropped"] == ["b1"]
