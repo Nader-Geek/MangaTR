@@ -6,8 +6,9 @@ stops at the core leaves a ghost ring after cleaning. The recipe:
 
 1. the background colour is the median of the box's border band;
 2. pixels far from it (Otsu on the distance, clamped) are ink;
-3. small gaps are closed, then the ink is grown by a radius that follows the
-   box size, to reach the halo;
+3. small gaps are closed; the glow and shadow around the glyph (pixels part-way
+   between background and ink, connected to the ink and within reach of it) are
+   added; then the ink is grown by a radius that follows the box size;
 4. if nothing sensible comes out (no ink, or ink everywhere), the whole box is
    used: erasing too much inside a detected box is safer than leaving text.
 
@@ -26,11 +27,30 @@ from mangatr.scene import Rect
 MIN_DISTANCE = 24  # levels; below this the "ink" is noise
 MAX_DISTANCE = 90
 MAX_COVERAGE = 0.75  # more ink than this means the background guess failed
+GLOW_SHARE = 0.35  # a pixel this fraction of the ink threshold away from the background is glow
+MIN_GLOW = 10  # levels; fainter than this is the background's own texture
 
 
 def grow_radius(width: float, height: float) -> int:
     """How far to grow the ink to reach its halo: ~6% of the short side, 2..6 px."""
     return int(min(6, max(2, round(min(width, height) * 0.06))))
+
+
+def add_glow(ink: np.ndarray, distance: np.ndarray, limit: float, reach: int) -> np.ndarray:
+    """Grow `ink` (uint8 0/1) over the pixels whose distance from the background is
+    at least GLOW_SHARE of `limit`, at most `reach` pixels away from the ink and
+    connected to it. Seen on real pages: white lettering on a dark bubble has a
+    soft shadow that a threshold at the ink level leaves behind as a ghost."""
+    faint = distance >= max(MIN_GLOW, GLOW_SHARE * limit)
+    step = np.ones((3, 3), np.uint8)
+    grown = ink.copy()
+    for _ in range(reach):
+        wider = cv2.dilate(grown, step)
+        wider = np.where(faint, wider, grown)
+        if np.array_equal(wider, grown):
+            break
+        grown = wider
+    return grown
 
 
 def _border_band(gray: np.ndarray, band: int) -> np.ndarray:
@@ -67,6 +87,7 @@ def text_mask(rgb: np.ndarray, frame: Rect, *, pad: int = 4) -> tuple[int, int, 
     close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
     ink = cv2.morphologyEx(ink, cv2.MORPH_CLOSE, close)
     radius = grow_radius(frame.w, frame.h)
+    ink = add_glow(ink, distance, limit, 2 * radius + 2)
     grow = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * radius + 1, 2 * radius + 1))
     mask = absorb_halo(crop, cv2.dilate(ink, grow).astype(bool))
     if mask.mean() > MAX_COVERAGE:
