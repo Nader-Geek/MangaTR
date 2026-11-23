@@ -169,3 +169,5 @@
 الملخص الكامل (97 سطر، كل ادعاء موسوم read code/inferred) في ملف الـ scratchpad `01-koharu.md`. أهم ما فيه: عتبات الكشف (onomatopoeia 0.4، bubble 0.4)، ترتيب القراءة XY-cut، bubble holder عند 0.5، "غرف" الفقاعة، قص الـ OCR مع تفريغ الجيران بلون الوسيط، سلم التنظيف (لون مسطح ← plane fit ← Telea ← LaMa بـ 800px وهامش 128)، prompt الترجمة بـ JSON مرقّم مع echo guard، وكاسر السطور DP بحد تصغير 0.5 وارتفاع سطر 1.2. الـ typeset عندهم مش مرحلة منفصلة (التموضع بيتكتب وقت الترجمة).
 
 ملخص KOMA الكامل (112 سطر): `docs/refs-koma.md`. وملخص Koharu: `docs/refs-koharu.md`.
+
+ملخص OverTranslate الكامل (183 سطر): `docs/refs-overtranslate.md`. تفاصيل: كاشف RT-DETR (640 squash، حد 0.3، دمج 0.7)، OCR بـ CPT-flex (شبكة 196 patch، decode جشع بحد 160 توكن)، CRAFT بدخل 384 وقطع عند أقل حبر، SecondLook بمقياس 0.77، وقاموس طويل-أولاً بحد 20 مدخل/600 حرف، وتاريخ 16 زوج بقص 2000 توكن. Inpaint.cs منفذ OpenCV (Apache-2.0) فنستخدم `cv2.inpaint` بـ INPAINT_NS. رخصة أوزان RT-DETR لسه ما اتفحصتش، وما اتقراش: MangaLineGeometry وLumaPage وVerticalColumnGrouping وCpuAdaptiveBackground.
