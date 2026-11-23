@@ -52,11 +52,11 @@
 - `packages/mini-backend/models/inpainting`: عقد AOT وLaMa ONNX ✔ (منقولة في `model_tiers.py`).
 - `services/splitter_analysis.py`: تقطيع الأشرطة ✔ (منقول في `strips.py`).
 - `core/`, `mini_backend_tools/`: إدارة العمليات، الكاش، الجدولة ◐.
-- Comic Text Detector (ماسك نص): ⚠ GPL-3.0.
+- Comic Text Detector: GPL-3.0 حسب `docs/THIRD-PARTY-NOTICES.md` عندهم، والأوزان بتتنزّل وقت التشغيل. تصحيح: الـ adapter عندهم بيستعمل رأس الصناديق بس وبيتجاهل ماسك النص؛ الماسك عندهم من Otsu + connected components (`baka_segmenter.py`) أو من تحويل الصناديق لماسك.
 
 **نقاط القوة:** جودة الترجمة (قاموس، never-translate، فحوص بقايا اللغة والتكرار والفراغ)، تحويل OOM على الـ GPU لـ CPU، كتالوج موديلات بحد VRAM، طابور مهام.
 
-**ناخده:** عقد AOT/LaMa (تم)، الأشرطة (تم)، القاموس والفحوص (دفعة 2)، إدارة الـ GPU (دفعة 3). **Comic Text Detector** كمصدر ماسك نص جاهز بدل Otsu على الحالات الصعبة (الآن مسموح للاستخدام الخاص) — يتجرّب مقابل `textmask`.
+**ناخده:** عقد AOT/LaMa (تم)، الأشرطة (تم)، القاموس والفحوص (دفعة 2)، إدارة الـ GPU (دفعة 3). ماسك Comic Text Detector نفسه مش موجود في كود KOMA (بيتجاهلوه)، فلو عايزينه نلاقي الوصفة في BallonsTranslator (وكيل 5). المفيد فعلاً من KOMA: عقد `BaseInpainter` (عتبة ماسك 128، دمج مخفّف الحواف محصور بالماسك)، تمرير تعبئة لون مسطح من إحصاءات الحلقة، فحوص QA (echo وresidue ونسبة الطول وidentical)، وذاكرة ترجمة sqlite بمطابقة تامة، وفحص VRAM حر قبل OCR VLM (8/10/14GB)، وفترة cooldown للمزوّد 300 ثانية. أوزان AOT وLaMa-manga (ogkalu) ملهاش رخصة مذكورة.
 
 **ضعف:** معظم الكود TypeScript/واجهة، مش محتاجينه؛ الجرد مبني على القراءة ما اتشغلش.
 
@@ -167,3 +167,5 @@
 ## ملحق: تفاصيل Koharu المقروءة بالكود
 
 الملخص الكامل (97 سطر، كل ادعاء موسوم read code/inferred) في ملف الـ scratchpad `01-koharu.md`. أهم ما فيه: عتبات الكشف (onomatopoeia 0.4، bubble 0.4)، ترتيب القراءة XY-cut، bubble holder عند 0.5، "غرف" الفقاعة، قص الـ OCR مع تفريغ الجيران بلون الوسيط، سلم التنظيف (لون مسطح ← plane fit ← Telea ← LaMa بـ 800px وهامش 128)، prompt الترجمة بـ JSON مرقّم مع echo guard، وكاسر السطور DP بحد تصغير 0.5 وارتفاع سطر 1.2. الـ typeset عندهم مش مرحلة منفصلة (التموضع بيتكتب وقت الترجمة).
+
+ملخص KOMA الكامل (112 سطر): `docs/refs-koma.md`. وملخص Koharu: `docs/refs-koharu.md`.
