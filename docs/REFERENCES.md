@@ -128,7 +128,7 @@
 **أماكن مهمة:** `main/layout.py`, `translator.py`, `renderer.py`, `README.md`, `AGNETS.md`.
 
 **نقاط القوة:**
-1. تجميع حسب الفقاعة بـ flood fill على الورق: نص في فقاعتين ينقسم، كتلتين في فقاعة تتدمجان، الباقي مسار SFX.
+1. تجميع حسب الفقاعة بـ flood fill على الورق: نص في فقاعتين ينقسم، كتلتين في فقاعة تتدمجان، الباقي يرجع كماسك متبقٍّ (تصحيح: `layout.py` ما فيهوش مسار SFX خاص؛ `pipeline.py` هو اللي بيتعامل مع النص خارج الفقاعات).
 2. مرحلة إصلاح الترجمة: تكتشف الياباني المتبقي والروماجي وكلام الرفض وتعيد طلب الفاشل بس، بحسب عدد متوقع للأسطر.
 3. أفكار الرسم: تنسيق السطور على أشرطة عرض الفقاعة، تنظيف النص من حروف ناقصة في الخط، لون الحد من لون النص، تشطير في الفقاعات الضيقة.
 
@@ -173,3 +173,5 @@
 ملخص OverTranslate الكامل (183 سطر): `docs/refs-overtranslate.md`. تفاصيل: كاشف RT-DETR (640 squash، حد 0.3، دمج 0.7)، OCR بـ CPT-flex (شبكة 196 patch، decode جشع بحد 160 توكن)، CRAFT بدخل 384 وقطع عند أقل حبر، SecondLook بمقياس 0.77، وقاموس طويل-أولاً بحد 20 مدخل/600 حرف، وتاريخ 16 زوج بقص 2000 توكن. Inpaint.cs منفذ OpenCV (Apache-2.0) فنستخدم `cv2.inpaint` بـ INPAINT_NS. رخصة أوزان RT-DETR لسه ما اتفحصتش، وما اتقراش: MangaLineGeometry وLumaPage وVerticalColumnGrouping وCpuAdaptiveBackground.
 
 ملخص BallonsTranslator الكامل (266 سطر): `docs/refs-ballons.md`. القسم 1.9 فيه وصفة تشغيل Comic Text Detector لوحده: إدخال ONNX ثابت 1024 عبر cv2.dnn، حشو أسفل ويمين بس، ترتيب مخرجات mask/lines معكوس، فك DBNet (thresh 0.3، unclip 1.5، قطع 0.6)، وتغذية BGR لـ ONNX (مسار torch بيقلب القنوات). أفخاخ: كتل YOLO بتتحسب وتتجاهل، و`panel_finder.closest_text_to_panel_index` فيه خطأ (ما بيسجّلش أقرب panel). التنظيف: AOT بتحجيم 2048 وحشو 128، LaMa بحشو مضاعفات 64، وطريق مختصر للفقاعة المسطحة (std 7/10). مستخرج Qt-free لسياق الترجمة (تاريخ/قاموس/ذاكرة) يستاهل النقل. `bubble_shape` مربوط بـ Qt.
+
+ملخص Manga-Translator-OCR الكامل (169 سطر): `docs/refs-manga-translator-ocr.md`. الترخيص MIT (Kaushik Paul 2026) متأكد بالـ grep؛ الأوزان والخطوط ليها تراخيصها ولسه ما اتفحصتش. `layout.py` شبه جاهز للنقل (flood fill على الورق مع تحقق بالألوان والتشبع ونسبة الثقوب والمساحة، ودمج union-find). `translator.py`: دفعات 10، parser مرقّم، إصلاح الدفعة ثم الأسطر الفاشلة لوحدها. `renderer.py` قريت دوال محددة بس؛ أفضل ما فيه `render_text_in_bubble` (كلمات على أشرطة صفوف من distance transform لماسك الفقاعة)، لكن `_sanitize_for_font` بيعتمد على `fc-query` وثوابت بكسلات مطلقة، وترتيب القراءة عندهم 3 أشرطة خام.
