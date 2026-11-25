@@ -23,7 +23,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, features
 
 from .languages import Direction, Language, base_direction, get_language
 from .pipeline import Context
@@ -293,6 +293,11 @@ def _hex(value: int) -> str:
 
 class Typesetter:
     def __init__(self, language: Language | str, font_path: str | None = None) -> None:
+        if not features.check("raqm"):
+            raise RuntimeError(
+                "Pillow has no Raqm support, so Arabic would not join. "
+                "Install it: apt-get install -y libraqm0 (and reinstall Pillow if needed)"
+            )
         self.language = get_language(language) if isinstance(language, str) else language
         self.measurer = Measurer(font_path or find_font(self.language), self.language)
 

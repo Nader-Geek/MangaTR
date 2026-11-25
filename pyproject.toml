@@ -14,6 +14,9 @@ dependencies = ["numpy>=1.26", "opencv-python-headless>=4.9", "pillow>=10.1", "h
 dev = ["pytest>=8", "ruff>=0.6", "onnx>=1.16", "onnxruntime>=1.18"]
 # on a GPU machine install this instead of onnxruntime: the two conflict
 gpu = ["onnxruntime-gpu>=1.18", "huggingface_hub>=0.23"]
+# manga-ocr (Japanese reading) runs on torch and transformers
+ocr = ["torch", "transformers>=4.40"]
+bot = ["discord.py>=2.4"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["mangatr"]

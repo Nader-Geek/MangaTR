@@ -161,3 +161,22 @@ def test_a_text_is_held_by_the_bubble_with_most_of_its_box_not_by_its_centre():
     assert holding_bubble(text, [big, small]) == small
     edge_remark = Rect(280, 100, 60, 40)  # mostly outside: 20/60 inside the big bubble
     assert holding_bubble(edge_remark, [big]) is None
+
+
+class SizeDependentSession(FakeSession):
+    """Finds the first text at any size and a second one only in the downscaled read."""
+
+    def run(self, _o, feeds):
+        w, h = (int(v) for v in feeds["orig_target_sizes"][0])
+        boxes = [(1, 0.9, (10, 10, 100, 60))]
+        if w < 300:
+            boxes.append((1, 0.8, (150, 100, 100, 60)))
+        return outputs(boxes)
+
+
+def test_second_read_at_another_size_adds_what_the_first_missed():
+    page = np.zeros((400, 300, 3), np.uint8)
+    one = Detector(SizeDependentSession(), second_scale=None).detect(page)
+    two = Detector(SizeDependentSession(), second_scale=0.77).detect(page)
+    assert len(one) == 1 and len(two) == 2
+    assert all(0 <= d.rect.x < 300 and d.rect.w > 0 for d in two)  # back in page pixels

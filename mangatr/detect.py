@@ -32,6 +32,8 @@ MIN_SIDE = 12  # px; smaller boxes are noise
 MIN_AREA = 400
 TILE_HEIGHT = 1680  # long strips are cut into overlapping tiles (old engine's values)
 TILE_OVERLAP = 520
+SECOND_SCALE = 0.77  # OverTranslate's second read: the model's output changes with the input
+# size, and the union of two sizes found 111-119 of 132 balloons where one found 98 (their data)
 
 
 @dataclass(frozen=True, slots=True)
@@ -260,15 +262,40 @@ class Detector:
     """The ONNX model behind `decode`. `session` is an InferenceSession or a stand-in."""
 
     def __init__(
-        self, session: Any, *, threshold: float = 0.35, iou: float = DUPLICATE_IOU
+        self,
+        session: Any,
+        *,
+        threshold: float = 0.35,
+        iou: float = DUPLICATE_IOU,
+        second_scale: float | None = SECOND_SCALE,
     ) -> None:
         names = [item.name for item in session.get_inputs()]
         self._session = session
         self._images = "images" if "images" in names else names[0]
         self._sizes = "orig_target_sizes" if "orig_target_sizes" in names else None
         self.threshold, self.iou = threshold, iou
+        self.second_scale = second_scale
 
     def _one(self, rgb: np.ndarray) -> list[Detection]:
+        found = self._read(rgb)
+        if not self.second_scale or self.second_scale >= 1:
+            return found
+        height, width = rgb.shape[:2]
+        small = cv2.resize(
+            rgb,
+            (max(1, round(width * self.second_scale)), max(1, round(height * self.second_scale))),
+            interpolation=cv2.INTER_AREA,
+        )
+        sx, sy = width / small.shape[1], height / small.shape[0]
+        again = [
+            Detection(
+                d.label, d.score, Rect(d.rect.x * sx, d.rect.y * sy, d.rect.w * sx, d.rect.h * sy)
+            )
+            for d in self._read(small)
+        ]
+        return nms([*found, *again], self.iou)
+
+    def _read(self, rgb: np.ndarray) -> list[Detection]:
         tensor, sizes = preprocess(rgb)
         feeds = {self._images: tensor}
         if self._sizes:

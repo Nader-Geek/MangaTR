@@ -34,7 +34,11 @@ def test_a_page_goes_through_and_the_record_has_timings(tmp_path):
     path = tmp_path / "p.png"
     cv2.imwrite(str(path), page)
     record = run_page(
-        path, Detector(FakeSession()), {"opencv": ((), OpenCvTier())}, tmp_path, lambda _m: None
+        path,
+        Detector(FakeSession(), second_scale=None),
+        {"opencv": ((), OpenCvTier())},
+        tmp_path,
+        lambda _m: None,
     )
     assert record["blocks"] == 1 and record["opencv"]["seconds"] >= 0
     assert (tmp_path / "p_sheet.jpg").exists()
@@ -60,7 +64,11 @@ def test_crops_sheet_has_a_row_per_block_and_the_record_lists_detections(tmp_pat
     path = tmp_path / "p.png"
     cv2.imwrite(str(path), page)
     record = run_page(
-        path, Detector(FakeSession()), {"opencv": ((), OpenCvTier())}, tmp_path, lambda _m: None
+        path,
+        Detector(FakeSession(), second_scale=None),
+        {"opencv": ((), OpenCvTier())},
+        tmp_path,
+        lambda _m: None,
     )
     assert (tmp_path / "p_crops.jpg").exists()
     assert record["detections"][0][0] == "text_bubble" and record["detections"][0][-1] is True
@@ -88,10 +96,20 @@ def test_ocr_drops_a_box_that_is_not_lettering_and_records_the_text(tmp_path):
     cv2.imwrite(str(path), page)
     chosen = {"opencv": ((), OpenCvTier())}
     kept = run_page(
-        path, Detector(FakeSession()), chosen, tmp_path, lambda _m: None, OcrStage([_Reader("あ")])
+        path,
+        Detector(FakeSession(), second_scale=None),
+        chosen,
+        tmp_path,
+        lambda _m: None,
+        OcrStage([_Reader("あ")]),
     )
     assert kept["blocks"] == 1 and kept["ocr"]["text"] == {"b1": "あ"}
     gone = run_page(
-        path, Detector(FakeSession()), chosen, tmp_path, lambda _m: None, OcrStage([_Reader("…")])
+        path,
+        Detector(FakeSession(), second_scale=None),
+        chosen,
+        tmp_path,
+        lambda _m: None,
+        OcrStage([_Reader("…")]),
     )
     assert gone["blocks"] == 0 and gone["ocr"]["dropped"] == ["b1"]
