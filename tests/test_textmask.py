@@ -67,3 +67,47 @@ def test_glow_stops_at_reach_and_at_background():
     assert grown.sum() == 49  # a 7x7 square: three steps, no more
     distance[:] = 0.0  # nothing is faint: ink stays as it was
     assert add_glow(ink, distance, 60.0, reach=3).sum() == 1
+
+
+def _striped_pink():
+    """Pink lettering on beige vertical stripes: the grey level of the ink equals the
+    stripes', so a grey threshold sees noise (the page-07 case)."""
+    import cv2
+
+    img = np.zeros((90, 260, 3), np.uint8)
+    for x in range(260):
+        img[:, x] = (236, 216, 200) if (x // 6) % 2 == 0 else (214, 196, 182)
+    cv2.putText(img, "HELP", (20, 62), cv2.FONT_HERSHEY_SIMPLEX, 1.6, (205, 90, 120), 6)
+    return img
+
+
+def test_coloured_lettering_on_stripes_gets_a_tight_mask_not_the_whole_box():
+    img = _striped_pink()
+    x0, y0, mask = text_mask(img, Rect(5, 5, 250, 80))
+    assert mask.mean() < 0.5  # not the rectangle fallback
+    ink = np.abs(img.astype(int) - (205, 90, 120)).sum(axis=2) < 40
+    covered = (mask & ink[y0 : y0 + mask.shape[0], x0 : x0 + mask.shape[1]]).sum()
+    assert covered >= 0.95 * ink.sum()
+
+
+def test_marks_above_the_glyphs_are_covered_more_than_below():
+    img = np.full((80, 80, 3), 255, np.uint8)
+    img[30:50, 30:34] = 0
+    x0, y0, mask = text_mask(img, Rect(20, 20, 40, 40), pad=4)
+    ys = np.flatnonzero(mask.any(axis=1)) + y0
+    assert (30 - ys.min()) > (ys.max() - 49)
+
+
+def test_stroke_variation_tells_lettering_from_a_smear():
+    from mangatr.textmask import stroke_variation
+
+    bars = np.zeros((60, 60), np.uint8)
+    bars[:, 5:9] = 1
+    bars[:, 20:24] = 1
+    bars[:, 35:39] = 1
+    blob = np.zeros((60, 60), np.uint8)
+    blob[5:55, 5:12] = 1
+    blob[20:50, 12:50] = 1
+    blob[10:15, 30:55] = 1
+    assert stroke_variation(bars) < stroke_variation(blob)
+    assert stroke_variation(np.zeros((5, 5), np.uint8)) == float("inf")

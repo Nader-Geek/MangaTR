@@ -120,21 +120,26 @@ Pitfalls [R]: (a) `closest_text_to_panel_index` never records the argmin panel: 
 # pip install numpy opencv-python shapely pyclipper  (+ torch/einops only for .pt)
 import cv2, numpy as np, pyclipper
 from shapely.geometry import Polygon
+
 # weights: curl -L -o comictextdetector.pt.onnx https://huggingface.co/dreMaz/mit_models/resolve/main/comictextdetector.pt.onnx
 S = 1024
-net = cv2.dnn.readNetFromONNX('comictextdetector.pt.onnx'); outs = net.getUnconnectedOutLayersNames()
+net = cv2.dnn.readNetFromONNX("comictextdetector.pt.onnx")
+outs = net.getUnconnectedOutLayersNames()
 
-def run(bgr):                                     # bgr: HxWx3 uint8 (cv2.imread)
+
+def run(bgr):  # bgr: HxWx3 uint8 (cv2.imread)
     h, w = bgr.shape[:2]
-    r = min(S/h, S/w); nw, nh = round(w*r), round(h*r)
-    dw, dh = S-nw, S-nh
+    r = min(S / h, S / w)
+    nw, nh = round(w * r), round(h * r)
+    dw, dh = S - nw, S - nh
     im = cv2.copyMakeBorder(cv2.resize(bgr, (nw, nh)), 0, dh, 0, dw, cv2.BORDER_CONSTANT, value=0)
-    net.setInput(cv2.dnn.blobFromImage(im, 1/255., (S, S)))
+    net.setInput(cv2.dnn.blobFromImage(im, 1 / 255.0, (S, S)))
     blks, mask, lines = net.forward(outs)
-    if mask.shape[1] == 2: mask, lines = lines, mask        # OpenCV output-order quirk
-    mask = mask.squeeze()[:S-dh, :S-dw]                     # crop padding
-    lines = lines[0, 0, :S-dh, :S-dw]                       # shrink map only
-    mask = cv2.resize((mask*255).astype(np.uint8), (w, h))  # text-pixel prob 0..255
+    if mask.shape[1] == 2:
+        mask, lines = lines, mask  # OpenCV output-order quirk
+    mask = mask.squeeze()[: S - dh, : S - dw]  # crop padding
+    lines = lines[0, 0, : S - dh, : S - dw]  # shrink map only
+    mask = cv2.resize((mask * 255).astype(np.uint8), (w, h))  # text-pixel prob 0..255
     # DB decode: bitmap = lines>0.3 -> contours -> minAreaRect -> score(mean shrink) -> unclip 1.5 -> rescale
     ...  # port SegDetectorRepresenter.boxes_from_bitmap (db_utils.py:127-216) with dest=(w,h), keep score>0.6
     return mask, quads

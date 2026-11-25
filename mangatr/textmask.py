@@ -29,6 +29,9 @@ MAX_DISTANCE = 90
 MAX_COVERAGE = 0.75  # more ink than this means the background guess failed
 GLOW_SHARE = 0.35  # a pixel this fraction of the ink threshold away from the background is glow
 MIN_GLOW = 10  # levels; fainter than this is the background's own texture
+LIFT = 2  # px of extra growth upward: dakuten and dots sit above the glyph body
+COLOUR_MARGIN = 0.15  # the colour distance must beat the grey one by this much to be used
+MIN_INK = 0.01  # less ink than this share of the crop is noise
 
 
 def grow_radius(width: float, height: float) -> int:
@@ -53,6 +56,53 @@ def add_glow(ink: np.ndarray, distance: np.ndarray, limit: float, reach: int) ->
     return grown
 
 
+def stroke_variation(ink: np.ndarray) -> float:
+    """How uneven the stroke width is: std/mean of the widths along the ridges of the
+    distance transform. Lettering has strokes of one width (low); stripes, grain and
+    a box-wide smear do not (high). inf when there is no ink."""
+    mask = ink.astype(np.uint8)
+    if not mask.any():
+        return float("inf")
+    dist = cv2.distanceTransform(mask, cv2.DIST_L2, 3)
+    ridge = (dist > 0) & (dist >= cv2.dilate(dist, np.ones((3, 3), np.uint8)) - 1e-6)
+    widths = dist[ridge] * 2
+    if widths.size < 8:
+        return float("inf")
+    return float(widths.std() / max(widths.mean(), 1e-6))
+
+
+def _distances(crop: np.ndarray, band: int) -> list[tuple[str, np.ndarray]]:
+    """The ways to measure "how far from the background": grey level (first) and the
+    distance in colour. Coloured lettering whose grey level equals the background's
+    (pink on beige stripes) only shows in the second."""
+    gray = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY)
+    background = float(np.median(_border_band(gray, band)))
+    by_grey = np.abs(gray.astype(np.float32) - background)
+    edge = np.concatenate(
+        [
+            crop[:band].reshape(-1, 3),
+            crop[-band:].reshape(-1, 3),
+            crop[:, :band].reshape(-1, 3),
+            crop[:, -band:].reshape(-1, 3),
+        ]
+    )
+    colour = np.median(edge, axis=0).astype(np.float32)
+    by_colour = np.linalg.norm(crop.astype(np.float32) - colour, axis=2) / np.sqrt(3.0)
+    return [("grey", by_grey), ("colour", by_colour)]
+
+
+def _ink_of(distance: np.ndarray) -> tuple[np.ndarray, float]:
+    scaled = np.clip(distance, 0, 255).astype(np.uint8)
+    otsu, _ = cv2.threshold(scaled, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    limit = float(np.clip(otsu, MIN_DISTANCE, MAX_DISTANCE))
+    return (distance >= limit).astype(np.uint8), limit
+
+
+def _usable(ink: np.ndarray) -> bool:
+    share = float(ink.mean())
+    return MIN_INK <= share <= MAX_COVERAGE
+
+
 def _border_band(gray: np.ndarray, band: int) -> np.ndarray:
     band = max(1, min(band, gray.shape[0] // 2, gray.shape[1] // 2))
     inner = np.zeros(gray.shape, bool)
@@ -74,22 +124,27 @@ def text_mask(rgb: np.ndarray, frame: Rect, *, pad: int = 4) -> tuple[int, int, 
     if crop.size == 0 or min(crop.shape[:2]) < 3:
         return x0, y0, whole
 
-    gray = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY)
-    background = float(np.median(_border_band(gray, max(2, pad))))
-    distance = np.abs(gray.astype(np.float32) - background)
-    scaled = np.clip(distance, 0, 255).astype(np.uint8)
-    otsu, _ = cv2.threshold(scaled, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    limit = float(np.clip(otsu, MIN_DISTANCE, MAX_DISTANCE))
-    ink = (distance >= limit).astype(np.uint8)
-    if not ink.any():
+    band = max(1, min(max(2, pad), crop.shape[0] // 2, crop.shape[1] // 2))
+    chosen: tuple[float, np.ndarray, np.ndarray, float] | None = None
+    for name, candidate in _distances(crop, band):
+        ink, limit = _ink_of(candidate)
+        if not _usable(ink):
+            continue
+        score = stroke_variation(ink)
+        if chosen is None or (name == "colour" and score < chosen[0] - COLOUR_MARGIN):
+            chosen = (score, candidate, ink, limit)
+    if chosen is None:
         return x0, y0, whole
+    _, distance, ink, limit = chosen
 
     close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
     ink = cv2.morphologyEx(ink, cv2.MORPH_CLOSE, close)
     radius = grow_radius(frame.w, frame.h)
     ink = add_glow(ink, distance, limit, 2 * radius + 2)
     grow = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * radius + 1, 2 * radius + 1))
-    mask = absorb_halo(crop, cv2.dilate(ink, grow).astype(bool))
+    grown = cv2.dilate(ink, grow)
+    grown[:-LIFT] |= grown[LIFT:]  # one pixel row up per LIFT: the marks above the glyphs
+    mask = absorb_halo(crop, grown.astype(bool))
     if mask.mean() > MAX_COVERAGE:
         return x0, y0, whole
     return x0, y0, mask
