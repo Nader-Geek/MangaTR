@@ -111,3 +111,52 @@ def test_stroke_variation_tells_lettering_from_a_smear():
     blob[10:15, 30:55] = 1
     assert stroke_variation(bars) < stroke_variation(blob)
     assert stroke_variation(np.zeros((5, 5), np.uint8)) == float("inf")
+
+
+def _fill_ellipse(ink, centre, axes):
+    import cv2
+
+    cv2.ellipse(ink, centre, axes, 0, 0, 360, 1, -1)
+
+
+def _bars_and_blob(with_blob: bool):
+    ink = np.zeros((80, 200), np.uint8)
+    for k in range(8):  # eight thin strokes, like lettering
+        ink[20:50, 10 + 14 * k : 14 + 14 * k] = 1
+    if with_blob:
+        _fill_ellipse(ink, (160, 50), (30, 25))
+    return ink
+
+
+def test_a_thick_blob_among_thin_strokes_is_art_and_is_removed():
+    from mangatr.textmask import drop_art
+
+    cleaned = drop_art(_bars_and_blob(True))
+    assert cleaned[50, 160] == 0  # the blob is gone
+    assert cleaned[30, 12] == 1  # the strokes stay
+
+
+def test_lettering_alone_is_untouched():
+    from mangatr.textmask import drop_art
+
+    ink = _bars_and_blob(False)
+    assert (drop_art(ink) == ink).all()
+
+
+def test_with_too_few_marks_nothing_is_dropped():
+    from mangatr.textmask import drop_art
+
+    ink = np.zeros((60, 60), np.uint8)
+    _fill_ellipse(ink, (30, 30), (25, 25))
+    assert (drop_art(ink) == ink).all()
+
+
+def test_text_beside_a_drawing_gets_a_mask_that_stops_at_the_drawing():
+    import cv2
+
+    img = np.full((120, 300, 3), 20, np.uint8)
+    cv2.putText(img, "WORDS", (10, 60), cv2.FONT_HERSHEY_DUPLEX, 1.2, (255, 255, 255), 2)
+    cv2.ellipse(img, (240, 40), (55, 35), 0, 0, 360, (240, 235, 200), -1)  # an eye on the box edge
+    x0, y0, mask = text_mask(img, Rect(5, 25, 290, 60))
+    assert not mask[40 - y0, 240 - x0]  # the eye is not masked
+    assert mask[45 - y0, 30 - x0 : 120 - x0].any()  # the lettering is

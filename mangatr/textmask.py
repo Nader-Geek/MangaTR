@@ -31,6 +31,9 @@ GLOW_SHARE = 0.35  # a pixel this fraction of the ink threshold away from the ba
 MIN_GLOW = 10  # levels; fainter than this is the background's own texture
 LIFT = 2  # px of extra growth upward: dakuten and dots sit above the glyph body
 COLOUR_MARGIN = 0.15  # the colour distance must beat the grey one by this much to be used
+THICK = 3.0  # a mark with a part this many times thicker than the typical stroke is art
+ART_MIN_AREA = 200  # px; smaller marks (a big full stop) are never art
+MIN_GLYPHS = 5  # fewer separate marks than this and there is no "typical stroke" to compare to
 MIN_INK = 0.01  # less ink than this share of the crop is noise
 
 
@@ -69,6 +72,30 @@ def stroke_variation(ink: np.ndarray) -> float:
     if widths.size < 8:
         return float("inf")
     return float(widths.std() / max(widths.mean(), 1e-6))
+
+
+def drop_art(ink: np.ndarray) -> np.ndarray:
+    """Remove the marks that are drawing, not lettering: a blob much thicker than the strokes
+    of the rest of the ink (an eye, a hand, a window the box overlaps). Lettering is made of
+    strokes of one width; the typical width is the median over the ridges of the distance
+    transform, and a mark with a part thicker than THICK times that is art. Needs enough
+    separate marks to have a typical stroke; otherwise nothing is touched."""
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(ink, connectivity=8)
+    if count <= MIN_GLYPHS:
+        return ink
+    dist = cv2.distanceTransform(ink, cv2.DIST_L2, 3)
+    ridge = (dist > 0) & (dist >= cv2.dilate(dist, np.ones((3, 3), np.uint8)) - 1e-6)
+    if ridge.sum() < 8:
+        return ink
+    typical = 2 * float(np.median(dist[ridge]))
+    thickest = np.zeros(count, np.float32)
+    np.maximum.at(thickest, labels.ravel(), dist.ravel())
+    art = np.zeros(count, bool)
+    art[1:] = 2 * thickest[1:] > THICK * typical
+    art[1:] &= stats[1:, cv2.CC_STAT_AREA] > ART_MIN_AREA
+    if not art.any():
+        return ink
+    return (~art[labels] & (ink > 0)).astype(np.uint8)
 
 
 def _distances(crop: np.ndarray, band: int) -> list[tuple[str, np.ndarray]]:
@@ -136,6 +163,7 @@ def text_mask(rgb: np.ndarray, frame: Rect, *, pad: int = 4) -> tuple[int, int, 
     if chosen is None:
         return x0, y0, whole
     _, distance, ink, limit = chosen
+    ink = drop_art(ink)
 
     close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
     ink = cv2.morphologyEx(ink, cv2.MORPH_CLOSE, close)
