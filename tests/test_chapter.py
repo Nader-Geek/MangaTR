@@ -135,3 +135,18 @@ def test_provider_from_environment():
         config.make_provider("openai", env={})
     with pytest.raises(ValueError, match="unknown provider"):
         config.make_provider("nope", env={})
+
+
+def test_a_report_error_says_where_it_came_from(tmp_path):
+    class Boom:
+        def detect(self, rgb):
+            raise ValueError("bad shape")
+
+    pages = list_pages(make_pages(tmp_path / "in", count=1))
+    r = runner()
+    r.detector = Boom()
+    result = r.run(pages, tmp_path / "out")
+    assert (
+        "ValueError: bad shape" in result.pages[0].error
+        and "test_chapter.py" in result.pages[0].error
+    )

@@ -130,3 +130,45 @@ def test_read_works_without_a_loader_and_run_needs_one():
         ocr.run(page, CTX)
     ocr.read(page, IMAGE)
     assert page.block("a").source_text == "あ"
+
+
+class _Scores:
+    def __init__(self, values):
+        self.values = values
+
+    def exp(self):
+        import math
+
+        return _Scores([math.exp(v) for v in self.values])
+
+    def tolist(self):
+        return self.values
+
+
+def test_ocr_confidence_uses_the_beam_score_when_the_model_searches_with_beams():
+    from types import SimpleNamespace
+
+    from mangatr.ocr_models import MangaOcr
+
+    ocr = MangaOcr(None, None, None, "cpu")
+    out = SimpleNamespace(sequences_scores=_Scores([-0.1, -2.0]), sequences=None, scores=None)
+    first, second = ocr._confidences(out, 2)
+    assert 0.9 < first < 0.91 and 0.13 < second < 0.14
+
+
+def test_a_confidence_failure_keeps_the_reading_with_a_neutral_value():
+    import warnings
+    from types import SimpleNamespace
+
+    from mangatr.ocr_models import MangaOcr
+
+    class Model:
+        def compute_transition_scores(self, *_a, **_k):
+            raise RuntimeError("size mismatch")
+
+    ocr = MangaOcr(Model(), None, None, "cpu")
+    out = SimpleNamespace(sequences_scores=None, sequences=None, scores=None)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        assert ocr._confidences(out, 3) == [0.5, 0.5, 0.5]
+    assert "size mismatch" in str(caught[0].message)

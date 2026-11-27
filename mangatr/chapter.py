@@ -10,6 +10,7 @@ is reported and the chapter goes on; its original image is passed through.
 from __future__ import annotations
 
 import time
+import traceback
 from collections.abc import Callable, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -40,6 +41,13 @@ def list_pages(folder: str | Path) -> list[Path]:
     return sorted(
         (p for p in Path(folder).rglob("*") if p.suffix.lower() in IMAGE_SUFFIXES), key=key
     )
+
+
+def _where(exc: BaseException) -> str:
+    """The error with its type and the file:line that raised it, so a report is enough to debug."""
+    frames = traceback.extract_tb(exc.__traceback__)
+    place = f" [{Path(frames[-1].filename).name}:{frames[-1].lineno}]" if frames else ""
+    return f"{type(exc).__name__}: {exc}{place}"
 
 
 @dataclass(slots=True)
@@ -118,7 +126,7 @@ class ChapterRunner:
                 try:
                     page, cleaned = self._prepare(rgb, path.name, result.seconds)
                 except Exception as exc:  # one bad page must not stop the chapter
-                    result.error = f"prepare: {exc}"
+                    result.error = f"prepare: {_where(exc)}"
                     self._pass_through(result, rgb, out, path)
                     continue
                 result.blocks = len(page.blocks)
@@ -133,7 +141,7 @@ class ChapterRunner:
                     final = self.typesetter.render(cleaned, page)
                     result.seconds["typeset"] = time.perf_counter() - started
                 except Exception as exc:
-                    result.error = f"translate/typeset: {exc}"
+                    result.error = f"translate/typeset: {_where(exc)}"
                     final = cleaned
                 target = out / f"{Path(page.id).stem}.png"
                 cv2.imwrite(str(target), cv2.cvtColor(final, cv2.COLOR_RGB2BGR))

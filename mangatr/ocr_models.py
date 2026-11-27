@@ -70,14 +70,37 @@ class MangaOcr:
                     output_scores=True,
                     return_dict_in_generate=True,
                 )
-                scores = self.model.compute_transition_scores(
-                    out.sequences, out.scores, normalize_logits=True
-                )
-            generated = out.sequences[:, -scores.shape[1] :]
-            real = generated != self.tokenizer.pad_token_id
             texts = self.tokenizer.batch_decode(out.sequences, skip_special_tokens=True)
-            for row, text in enumerate(texts):
-                probabilities = scores[row][real[row]].exp()
-                confidence = float(probabilities.mean()) if probabilities.numel() else 0.0
+            confidences = self._confidences(out, len(texts))
+            for text, confidence in zip(texts, confidences, strict=True):
                 readings.append(Reading(clean_reading(text), confidence))
         return readings
+
+    def _confidences(self, out, count: int) -> list[float]:
+        """One confidence per crop: the mean token probability of the chosen reading.
+
+        The model's own config may ask for beam search, and then the per-step scores
+        are per beam (batch x beams rows) and do not line up with the sequences; the
+        beam search's own length-normalised score is used instead. If anything about
+        this fails the reading is kept with a neutral 0.5: a text must never be lost
+        to a confidence quirk (the neutral value passes the 0.25 free-text cut).
+        """
+        try:
+            beams = getattr(out, "sequences_scores", None)
+            if beams is not None:
+                return [float(v) for v in beams.exp().tolist()]
+            scores = self.model.compute_transition_scores(
+                out.sequences, out.scores, normalize_logits=True
+            )
+            generated = out.sequences[:, -scores.shape[1] :]
+            real = generated != self.tokenizer.pad_token_id
+            result = []
+            for row in range(count):
+                probabilities = scores[row][real[row]].exp()
+                result.append(float(probabilities.mean()) if probabilities.numel() else 0.0)
+            return result
+        except Exception as exc:
+            import warnings
+
+            warnings.warn(f"OCR confidence unavailable ({exc}); using 0.5", stacklevel=2)
+            return [0.5] * count
